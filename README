@@ -1,0 +1,42 @@
+👁️ Framework de Acessibilidade Digital por Visão Computacional
+
+Este projeto apresenta um MVP (Produto Mínimo Viável) de Interface Humano-Computador (IHC) desenvolvido em **Python** utilizando a nova API **MediaPipe Tasks**. O sistema emula as funções completas de um mouse e teclado físicos utilizando apenas o movimento dos olhos e das mãos em tempo real através de uma webcam comum, rodando **100% offline**.
+
+## 🛠️ Arquitetura do Sistema
+
+O software foi construído seguindo princípios de POO (Programação Orientada a Objetos) e divisão clara de responsabilidades:
+
+1. **Camada de Captura:** OpenCV gerencia o fluxo de vídeo da webcam de forma assíncrona.
+2. **Camada de Inteligência:** Processamento paralelo via Threads nativas da API *MediaPipe Tasks*, consumindo os modelos locais `hand_landmarker.task` e `face_landmarker.task`.
+3. **Camada de Ação (OS Engine):** PyAutoGUI injeta as chamadas de interrupção diretamente no Sistema Operacional.
+
+## 📈 Engenharia e Soluções de Código
+
+* **Filtro de Média Móvel:** Buffer dinâmico de 7 iterações para atenuar o tremor biológico involuntário, gerando um deslocamento fluido do cursor.
+* **Cálculo de EAR (Eye Aspect Ratio):** Algoritmo baseado na proporção geométrica adimensional do olho direito, garantindo resiliência matemática contra variações de distância entre o usuário e a câmera.
+* **Finger Click Trigger:** Detecção de clique através da deflexão angular do dedo indicador no eixo Y, mitigando falhas por oclusão do dedo polegar.
+
+## 🚀 Como Executar o Projeto
+
+### Pré-requisitos
+Certifique-se de ter o Python instalado e execute a instalação das dependências:
+```bash
+pip install opencv-python pyautogui numpy mediapipe
+```
+
+### Modelos de Inteligência Artificial
+Faça o download dos arquivos binários oficiais da Google e coloque-os na raiz do projeto:
+* [hand_landmarker.task](https://googleapis.com)
+* [face_landmarker.task](https://googleapis.com)
+
+### Execução
+```bash
+python main.py
+```
+
+## 🎮 Comandos do Sistema
+* **Mover o mouse:** Apontar o dedo indicador esticado.
+* **Clique Esquerdo:** Dobrar rapidamente a ponta do indicador (gesto de gatilho).
+* **Barra de Espaço:** Piscar o olho direito.
+* **Tecla P:** Pausa/Retoma o rastreamento do sistema.
+* **Tecla Q:** Encerra a execução do software.
