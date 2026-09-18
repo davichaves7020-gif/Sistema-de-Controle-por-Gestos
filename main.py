@@ -46,9 +46,15 @@ class ControladorNovaAPI:
         self.CANTO_ESQ_DIREITO = 33
         self.CANTO_DIR_DIREITO = 133
 
+        # Pontos do Olho Esquerdo para cálculo do EAR matemático
+        self.PALPEBRA_SUP_ESQUERDA = 386
+        self.PALPEBRA_INF_ESQUERDA = 374
+        self.CANTO_ESQ_ESQUERDO = 362
+        self.CANTO_DIR_ESQUERDO = 263
+
         # Controle de tempo (Cooldown rápido para resposta imediata)
         self.ultimo_clique_piscada = 0
-        self.cooldown_piscada = 0.25
+        self.cooldown_piscada = 0.40 # Aumentado levemente para evitar disparos duplos acidentais
 
         # Estado global dos detectores (Threads)
         self.ultimos_resultados_mao = None
@@ -86,7 +92,7 @@ class ControladorNovaAPI:
         )
         self.detector_rosto = vision.FaceLandmarker.create_from_options(opcoes_rosto)
 
-            def processar_mouse(self, img_w, img_h):
+    def processar_mouse(self, img_w, img_h):
         """
         Move o mouse e gerencia cliques e arrastos.
         Indicador + Polegar juntos = Drag and Drop (Segurar e Arrastar)
@@ -213,7 +219,7 @@ class ControladorNovaAPI:
 
         
     def processar_piscada(self, frame, img_w, img_h):
-        """Detecta a proporção geométrica (EAR) da piscada do olho direito."""
+        """Detecta piscada simples (olho direito = espaço) ou piscada dupla (ambos os olhos = captura de tela)."""
         if not self.ultimos_resultados_rosto or not self.ultimos_resultados_rosto.face_landmarks:
             return False
 
@@ -223,37 +229,73 @@ class ControladorNovaAPI:
             
         landmarks = rosto_lista[0] # Acessa os pontos do primeiro rosto detectado
 
-        p_sup = landmarks[self.PALPEBRA_SUP_DIREITA]
-        p_inf = landmarks[self.PALPEBRA_INF_DIREITA]
-        p_esq = landmarks[self.CANTO_ESQ_DIREITO]
-        p_dir = landmarks[self.CANTO_DIR_DIREITO]
+        # --- OLHO DIREITO ---
+        p_sup_d = landmarks[self.PALPEBRA_SUP_DIREITA]
+        p_inf_d = landmarks[self.PALPEBRA_INF_DIREITA]
+        p_esq_d = landmarks[self.CANTO_ESQ_DIREITO]
+        p_dir_d = landmarks[self.CANTO_DIR_DIREITO]
 
-        y_sup = p_sup.y * img_h
-        y_inf = p_inf.y * img_h
-        x_esq = p_esq.x * img_w
-        x_dir = p_dir.x * img_w
+        y_sup_d = p_sup_d.y * img_h
+        y_inf_d = p_inf_d.y * img_h
+        x_esq_d = p_esq_d.x * img_w
+        x_dir_d = p_dir_d.x * img_w
 
-        # Desenha os pontos do olho na tela para feedback visual na feira (Ciano)
-        cv2.circle(frame, (int(x_esq), int(y_sup)), 2, (255, 255, 0), -1)
-        cv2.circle(frame, (int(x_dir), int(y_inf)), 2, (255, 255, 0), -1)
+        # --- OLHO ESQUERDO ---
+        p_sup_e = landmarks[self.PALPEBRA_SUP_ESQUERDA]
+        p_inf_e = landmarks[self.PALPEBRA_INF_ESQUERDA]
+        p_esq_e = landmarks[self.CANTO_ESQ_ESQUERDO]
+        p_dir_e = landmarks[self.CANTO_DIR_ESQUERDO]
 
-        altura_olho = y_inf - y_sup
-        largura_olho = np.abs(x_dir - x_esq)
+        y_sup_e = p_sup_e.y * img_h
+        y_inf_e = p_inf_e.y * img_h
+        x_esq_e = p_esq_e.x * img_w
+        x_dir_e = p_dir_e.x * img_w
 
-        if largura_olho == 0:
-            return False
+        # Desenha os pontos de ambos os olhos na tela (Ciano)
+        cv2.circle(frame, (int(x_esq_d), int(y_sup_d)), 2, (255, 255, 0), -1)
+        cv2.circle(frame, (int(x_dir_d), int(y_inf_d)), 2, (255, 255, 0), -1)
+        cv2.circle(frame, (int(x_esq_e), int(y_sup_e)), 2, (255, 255, 0), -1)
+        cv2.circle(frame, (int(x_dir_e), int(y_inf_e)), 2, (255, 255, 0), -1)
 
-        # Proporção de Abertura do Olho (EAR)
-        ear = altura_olho / largura_olho
-        tempo_atual = time.time()
-        
-        # Limiar adaptado para 0.22 (piscada confortável e veloz)
-        if ear < 0.22 and (tempo_atual - self.ultimo_clique_piscada) > self.cooldown_piscada:
-            self.ultimo_clique_piscada = tempo_atual
-            pyautogui.press('space') 
-            return True
+            # Cálculo das proporções (EAR)
+            largura_d = np.abs(x_dir_d - x_esq_d)
+            largura_e = np.abs(x_dir_e - x_esq_e)
+
+            if largura_d == 0 or largura_e == 0:
+                return False
+
+            ear_direito = (y_inf_d - y_sup_d) / largura_d
+            ear_esquerdo = (y_inf_e - y_sup_e) / largura_e
             
-        return False
+            tempo_atual = time.time()
+            
+            # Limiar de piscada confortável
+            LIMIAR_PISCADA = 0.22
+
+            if (tempo_atual - self.ultimo_clique_piscada) > self.cooldown_piscada:
+                # 1. PISCOU AMBOS OS OLHOS SIMULTANEAMENTE (Captura de Tela)
+                if ear_direito < LIMIAR_PISCADA and ear_esquerdo < LIMIAR_PISCADA:
+                    self.ultimo_clique_piscada = tempo_atual
+                    
+                    # Executa o print e salva com a data/hora atual
+                    print_nome = f"screenshot_{int(time.time())}.png"
+                    print_tela = pyautogui.screenshot()
+                    print_tela.save(print_nome)
+                    
+                    print(f"[AÇÃO]: Captura de tela salva como '{print_nome}'")
+                    
+                    # Desenha uma mensagem rápida na tela avisando sobre o print
+                    cv2.putText(frame, "PRINT COLETADO!", (img_w // 3, img_h // 2), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
+                    return True
+                    
+                # 2. PISCOU APENAS O OLHO DIREITO (Pressiona Espaço)
+                elif ear_direito < LIMIAR_PISCADA and ear_esquerdo >= LIMIAR_PISCADA:
+                    self.ultimo_clique_piscada = tempo_atual
+                    pyautogui.press('space') 
+                    return True
+                
+            return False
 
 def iniciar(self):
         cap = cv2.VideoCapture(0)
