@@ -38,6 +38,7 @@ class ControladorNovaAPI:
         self.clique_esquerdo_pressionado = False
         self.clique_direito_pressionado = False
         self.clique_duplo_pressionado = False
+        self.arrastando = False
         
         # Pontos do Olho Direito para cálculo do EAR matemático
         self.PALPEBRA_SUP_DIREITA = 159
@@ -85,62 +86,104 @@ class ControladorNovaAPI:
         )
         self.detector_rosto = vision.FaceLandmarker.create_from_options(opcoes_rosto)
 
-        def processar_mouse(self, img_w, img_h):
-            """
-            Move o mouse com o indicador.
-            Indicador e Médio dobrados juntos = Clique Duplo (Gatilho)
-            Apenas Dedo Médio dobrado = Clique Esquerdo (Gatilho)
-            Apenas Dedo Indicador dobrado = Clique Direito (Gatilho)
-            """
-            if not self.ultimos_resultados_mao or not self.ultimos_resultados_mao.hand_landmarks:
-                return "NENHUM", None
+            def processar_mouse(self, img_w, img_h):
+        """
+        Move o mouse e gerencia cliques e arrastos.
+        Indicador + Polegar juntos = Drag and Drop (Segurar e Arrastar)
+        Indicador + Médio dobrados juntos = Clique Duplo (Gatilho)
+        Apenas Dedo Médio dobrado = Clique Esquerdo (Gatilho)
+        Apenas Dedo Indicador dobrado = Clique Direito (Gatilho)
+        """
+        if not self.ultimos_resultados_mao or not self.ultimos_resultados_mao.hand_landmarks:
+            if self.arrastando: # Garante que solta o mouse se a mao sumir da tela
+                pyautogui.mouseUp()
+                self.arrastando = False
+            return "NENHUM", None
+        
+        landmarks_lista = self.ultimos_resultados_mao.hand_landmarks
+        if len(landmarks_lista) == 0:
+            if self.arrastando:
+                pyautogui.mouseUp()
+                self.arrastando = False
+            return "NENHUM", None
             
-            landmarks_lista = self.ultimos_resultados_mao.hand_landmarks
-            if len(landmarks_lista) == 0:
-                return "NENHUM", None
-                
-            landmarks = landmarks_lista[0] # Acessa a primeira mão detectada
+        landmarks = landmarks_lista[0] # Acessa a primeira mão detectada
+        
+        p_indicador_ponta = landmarks[self.DEDO_INDICADOR] # Ponto 8 (Ponta)
+        p_indicador_meio = landmarks[6]                   # Ponto 6 (Articulação)
+        
+        p_medio_ponta = landmarks[self.DEDO_MEDIO]         # Ponto 12 (Ponta)
+        p_medio_meio = landmarks[10]                       # Ponto 10 (Articulação)
+        
+        p_polegar_ponta = landmarks[self.DEDO_POLEGAR]     # Ponto 4 (Ponta)
+
+        # 1. CÁLCULO DA DISTÂNCIA DA PINÇA (Indicador + Polegar)
+        # Calcula a distância euclidiana 3D entre as pontas do polegar e do indicador
+        dist_pinca = np.sqrt(
+            (p_indicador_ponta.x - p_polegar_ponta.x)**2 + 
+            (p_indicador_ponta.y - p_polegar_ponta.y)**2 + 
+            (p_indicador_ponta.z - p_polegar_ponta.z)**2
+        )
+
+        # Determina o ponto de referência para o cursor do mouse
+        # Se estiver arrastando, usa a média entre os dois dedos para estabilidade
+        if dist_pinca < 0.05: # Limiar da pinça (ajuste se necessário)
+            ref_x = (p_indicador_ponta.x + p_polegar_ponta.x) / 2
+            ref_y = (p_indicador_ponta.y + p_polegar_ponta.y) / 2
+        else:
+            ref_x = p_indicador_ponta.x
+            ref_y = p_indicador_ponta.y
+
+        # 2. Movimentação do Cursor
+        margem = 0.15
+        na_tela_x = np.interp(ref_x, [margem, 1.0 - margem], [0, self.largura_tela])
+        na_tela_y = np.interp(ref_y, [margem, 1.0 - margem], [0, self.altura_tela])
+
+        # Filtro de Média Móvel para Suavização
+        self.historico_x.append(na_tela_x)
+        self.historico_y.append(na_tela_y)
+        if len(self.historico_x) > self.suavizacao:
+            self.historico_x.pop(0)
+            self.historico_y.pop(0)
+        
+        mouse_x = int(np.mean(self.historico_x))
+        mouse_y = int(np.mean(self.historico_y))
+        pyautogui.moveTo(mouse_x, mouse_y)
+
+        # Coordenadas em pixels do ponto de referência para retorno visual
+        x1, y1 = int(ref_x * img_w), int(ref_y * img_h)
+        
+        estado_clique = "NENHUM"
+
+        # Identifica se os dedos estão dobrados (Ponta abaixo da articulação do meio)
+        indicador_dobrado = p_indicador_ponta.y > p_indicador_meio.y
+        medio_dobrado = p_medio_ponta.y > p_medio_meio.y
+
+        # 3. LÓGICA DOS GATILHOS COM PRIORIDADE (Arrastar > Clique Duplo > Simples)
+        if dist_pinca < 0.05:
+            # Gesto de Pinça: DRAG AND DROP ativo
+            if not self.arrastando:
+                pyautogui.mouseDown()
+                self.arrastando = True
+            estado_clique = "ARRASTANDO"
             
-            p_indicador_ponta = landmarks[self.DEDO_INDICADOR] # Ponto 8 (Ponta)
-            p_indicador_meio = landmarks[6]                   # Ponto 6 (Articulação)
-            
-            p_medio_ponta = landmarks[self.DEDO_MEDIO]         # Ponto 12 (Ponta)
-            p_medio_meio = landmarks[10]                       # Ponto 10 (Articulação)
+            # Reseta os outros estados de clique enquanto arrasta
+            self.clique_esquerdo_pressionado = False
+            self.clique_direito_pressionado = False
+            self.clique_duplo_pressionado = False
 
-            # 1. Movimentação do Cursor (Continua seguindo a ponta do indicador)
-            margem = 0.15
-            na_tela_x = np.interp(p_indicador_ponta.x, [margem, 1.0 - margem], [0, self.largura_tela])
-            na_tela_y = np.interp(p_indicador_ponta.y, [margem, 1.0 - margem], [0, self.altura_tela])
+        else:
+            # Se soltar a pinça, libera o botão do mouse
+            if self.arrastando:
+                pyautogui.mouseUp()
+                self.arrastando = False
 
-            # Filtro de Média Móvel para Suavização
-            self.historico_x.append(na_tela_x)
-            self.historico_y.append(na_tela_y)
-            if len(self.historico_x) > self.suavizacao:
-                self.historico_x.pop(0)
-                self.historico_y.pop(0)
-            
-            mouse_x = int(np.mean(self.historico_x))
-            mouse_y = int(np.mean(self.historico_y))
-            pyautogui.moveTo(mouse_x, mouse_y)
-
-            # Coordenadas em pixels do indicador para retorno visual
-            x1, y1 = int(p_indicador_ponta.x * img_w), int(p_indicador_ponta.y * img_h)
-            
-            estado_clique = "NENHUM"
-
-            # Identifica se os dedos estão dobrados (Ponta abaixo da articulação do meio)
-            indicador_dobrado = p_indicador_ponta.y > p_indicador_meio.y
-            medio_dobrado = p_medio_ponta.y > p_medio_meio.y
-
-            # 2. LÓGICA DOS GATILHOS COM PRIORIDADE
             if indicador_dobrado and medio_dobrado:
                 # Ambos dobrados: CLIQUE DUPLO
                 if not self.clique_duplo_pressionado:
                     pyautogui.doubleClick()
                     self.clique_duplo_pressionado = True
                 estado_clique = "DUPLO"
-                
-                # Reseta os outros gatilhos para não causarem conflito
                 self.clique_esquerdo_pressionado = False
                 self.clique_direito_pressionado = False
                 
@@ -161,12 +204,12 @@ class ControladorNovaAPI:
                 self.clique_duplo_pressionado = False
                 
             else:
-                # Nenhum dedo dobrado: Libera todos os gatilhos para o próximo clique
+                # Nenhum comando ativo: Libera gatilhos de cliques simples/duplos
                 self.clique_esquerdo_pressionado = False
                 self.clique_direito_pressionado = False
                 self.clique_duplo_pressionado = False
-            
-            return estado_clique, (x1, y1)
+        
+        return estado_clique, (x1, y1)
 
         
     def processar_piscada(self, frame, img_w, img_h):
@@ -254,6 +297,23 @@ def iniciar(self):
 
             # Fluxo de processamento condicional
             if not sistema_pausado:
+                estado_clique, coord_mao = self.processar_mouse(img_w, img_h)
+                self.processar_piscada(frame, img_w, img_h)
+                
+                if coord_mao:
+                    # Define as cores do cursor para feedback visual rápido
+                    if estado_clique == "ESQUERDO":
+                        cor_cursor = (0, 0, 255)    # Vermelho
+                    elif estado_clique == "DIREITO":
+                        cor_cursor = (255, 0, 0)    # Azul
+                    elif estado_clique == "DUPLO":
+                        cor_cursor = (255, 0, 255)  # Rosa / Magenta
+                    elif estado_clique == "ARRASTANDO":
+                        cor_cursor = (0, 255, 255)  # Amarelo (Pinça ativa)
+                    else:
+                        cor_cursor = (0, 255, 0)    # Verde (Livre)
+                        
+                    cv2.circle(frame, coord_mao, 8, cor_cursor, -1)
                 estado_clique, coord_mao = self.processar_mouse(img_w, img_h)
                 self.processar_piscada(frame, img_w, img_h)
                 
