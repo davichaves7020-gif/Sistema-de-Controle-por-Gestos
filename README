@@ -38,6 +38,7 @@ python main.py
 * **Mover o mouse:** Apontar o dedo indicador esticado.
 * **Clique direito:** Dobrar rapidamente a ponta do dedo indicador (gesto de gatilho).
 * **Clique Esquerdo:** Dobrar rapidamente a ponta do dedo do meio (gesto de gatilho).
+* **Clique Duplo:** Dobrar rapidamente a ponta dos dedos indicador e médio juntos (gesto de gatilho).
 * **Barra de Espaço:** Piscar o olho direito.
 * **Tecla P:** Pausa/Retoma o rastreamento do sistema.
 * **Tecla Q:** Encerra a execução do software.
