@@ -31,7 +31,12 @@ class ControladorNovaAPI:
 
         # Índices dos pontos de referência da Nova API (Mãos e Olhos)
         self.DEDO_INDICADOR = 8
+        self.DEDO_MEDIO = 12  
         self.DEDO_POLEGAR = 4
+
+        # Estados dos botões para lógica de gatilho rápido (evita clique infinito)
+        self.clique_esquerdo_pressionado = False
+        self.clique_direito_pressionado = False
         
         # Pontos do Olho Direito para cálculo do EAR matemático
         self.PALPEBRA_SUP_DIREITA = 159
@@ -80,20 +85,27 @@ class ControladorNovaAPI:
         self.detector_rosto = vision.FaceLandmarker.create_from_options(opcoes_rosto)
 
     def processar_mouse(self, img_w, img_h):
-        """Move o mouse e detecta o clique ao dobrar o indicador (Finger Click)."""
+        """
+        Move o mouse com o indicador.
+        Dedo Médio dobrado = Clique Esquerdo (Gatilho rápido)
+        Dedo Indicador dobrado = Clique Direito (Gatilho rápido)
+        """
         if not self.ultimos_resultados_mao or not self.ultimos_resultados_mao.hand_landmarks:
-            return False, None
+            return "NENHUM", None
         
         landmarks_lista = self.ultimos_resultados_mao.hand_landmarks
         if len(landmarks_lista) == 0:
-            return False, None
+            return "NENHUM", None
             
         landmarks = landmarks_lista[0] # Acessa a primeira mão detectada
         
         p_indicador_ponta = landmarks[self.DEDO_INDICADOR] # Ponto 8 (Ponta)
-        p_indicador_meio = landmarks[6]                   # Ponto 6 (Articulação do meio)
+        p_indicador_meio = landmarks[6]                   # Ponto 6 (Articulação)
+        
+        p_medio_ponta = landmarks[self.DEDO_MEDIO]         # Ponto 12 (Ponta)
+        p_medio_meio = landmarks[10]                      # Ponto 10 (Articulação)
 
-        # 1. Movimentação do Cursor (Mapeamento com margem adaptativa)
+        # 1. Movimentação do Cursor (Continua seguindo a ponta do indicador)
         margem = 0.15
         na_tela_x = np.interp(p_indicador_ponta.x, [margem, 1.0 - margem], [0, self.largura_tela])
         na_tela_y = np.interp(p_indicador_ponta.y, [margem, 1.0 - margem], [0, self.altura_tela])
@@ -109,16 +121,32 @@ class ControladorNovaAPI:
         mouse_y = int(np.mean(self.historico_y))
         pyautogui.moveTo(mouse_x, mouse_y)
 
-        # Coordenadas em pixels para retorno visual
+        # Coordenadas em pixels do indicador para retorno visual
         x1, y1 = int(p_indicador_ponta.x * img_w), int(p_indicador_ponta.y * img_h)
-
-        # 2. Nova Lógica de Clique: Se a ponta do indicador ficar abaixo da articulação do meio
-        if p_indicador_ponta.y > p_indicador_meio.y:
-            pyautogui.click()
-            return True, (x1, y1)
         
-        return False, (x1, y1)
+        estado_clique = "NENHUM"
 
+        # 2. LOGICA DO CLIQUE ESQUERDO: Dedo Médio dobrado (Gatilho)
+        if p_medio_ponta.y > p_medio_meio.y:
+            if not self.clique_esquerdo_pressionado:
+                pyautogui.click(button='left')
+                self.clique_esquerdo_pressionado = True # Trava para não repetir
+            estado_clique = "ESQUERDO"
+        else:
+            self.clique_esquerdo_pressionado = False # Libera o gatilho quando esticar o dedo
+
+        # 3. LÓGICA DO CLIQUE DIREITO: Dedo Indicador dobrado (Gatilho)
+        if p_indicador_ponta.y > p_indicador_meio.y:
+            if not self.clique_direito_pressionado:
+                pyautogui.click(button='right')
+                self.clique_direito_pressionado = True # Trava para não repetir
+            estado_clique = "DIREITO"
+        else:
+            self.clique_direito_pressionado = False # Libera o gatilho quando esticar o dedo
+        
+        return estado_clique, (x1, y1)
+
+    
     def processar_piscada(self, frame, img_w, img_h):
         """Detecta a proporção geométrica (EAR) da piscada do olho direito."""
         if not self.ultimos_resultados_rosto or not self.ultimos_resultados_rosto.face_landmarks:
@@ -162,7 +190,7 @@ class ControladorNovaAPI:
             
         return False
 
-    def iniciar(self):
+def iniciar(self):
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -171,13 +199,10 @@ class ControladorNovaAPI:
         print("-> Aponte o DEDO INDICADOR na camera para guiar o mouse.")
         print("-> DOBRE O INDICADOR rapidamente para dar CLIQUE ESQUERDO.")
         print("-> PISQUE O OLHO DIREITO para pressionar ESPAÇO.")
-        print("-> Pressione 'q' na janela gráfica para fechar o software.")
+        print("-> Pressione 'P' para PAUSAR / RETOMAR o controle.")
+        print("-> Pressione 'Q' na janela grafica para fechar o software.")
         print("================================================\n")
 
-# Criar uma variável de controle no seu __init__ (adicione lá se quiser, ou use direto aqui)
-        # self.sistema_pausado = False (coloque essa linha dentro do seu __init__)
-
-        # Adicione esta linha logo ANTES do loop while do método iniciar() se não quiser mexer no init:
         sistema_pausado = False
 
         while cap.isOpened():
@@ -185,9 +210,11 @@ class ControladorNovaAPI:
             if not sucesso:
                 break
 
+            # Espelha o frame horizontalmente para o movimento ser natural (estilo espelho)
             frame = cv2.flip(frame, 1)
             img_h, img_w, _ = frame.shape
             
+            # Converte e envia para a Nova API do MediaPipe em modo assincrono
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             
@@ -195,29 +222,44 @@ class ControladorNovaAPI:
             self.detector_mao.detect_async(mp_image, timestamp)
             self.detector_rosto.detect_async(mp_image, timestamp)
 
-            # Verifica comandos de teclado para pausa ou fechamento
+            # Captura comandos do teclado
             tecla = cv2.waitKey(1) & 0xFF
-            if tecla == ord('q'):
+            if tecla == ord('q') or tecla == ord('Q'):
                 break
-            elif tecla == ord('p'): # Tecla P inverte o estado de pausa do mouse/piscada
+            elif tecla == ord('p') or tecla == ord('P'): 
                 sistema_pausado = not sistema_pausado
-                print(f"=== SISTEMA {'PAUSADO' if sistema_pausado else 'RETOMADO'} ===")
+                print(f"[STATUS]: Controle {'PAUSADO' if sistema_pausado else 'RETOMADO'}")
 
-            if sistema_pausado:
-                cv2.putText(frame, "SISTEMA PAUSADO [P para Retomar]", (50, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            # Fluxo de processamento condicional
+            if not sistema_pausado:
+                estado_clique, coord_mao = self.processar_mouse(img_w, img_h)
+                self.processar_piscada(frame, img_w, img_h)
+                
+                if coord_mao:
+                    # Define a cor do cursor: Verde (Livre), Vermelho (Click Esq), Azul (Click Dir)
+                    if estado_clique == "ESQUERDO":
+                        cor_cursor = (0, 0, 255) # Vermelho
+                    elif estado_clique == "DIREITO":
+                        cor_cursor = (255, 0, 0) # Azul
+                    else:
+                        cor_cursor = (0, 255, 0) # Verde
+                        
+                    cv2.circle(frame, coord_mao, 8, cor_cursor, -1)
             else:
-                # Só processa se NÃO estiver pausado
-                clicou, pos_dedo = self.processar_mouse(img_w, img_h)
-                if pos_dedo:
-                    cor = (0, 0, 255) if clicou else (0, 255, 0)
-                    cv2.circle(frame, pos_dedo, 10, cor, -1)
+                # Exibe um aviso vermelho bem visivel na tela enquanto estiver pausado
+                cv2.putText(frame, "SISTEMA PAUSADO (P para retomar)", (15, 40), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-                if self.processar_piscada(frame, img_w, img_h):
-                    cv2.putText(frame, "PISCADA DETECTADA (ESPACO)", (50, 50), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            # Renderiza o frame na janela grafica
+            cv2.imshow("Controlador MediaPipe Tasks", frame)
 
-            cv2.imshow("Nova API MediaPipe Tasks - Engenharia de Software", frame)
+        # Liberacao limpa e obrigatoria de hardware e memoria ao fechar o app
+        cap.release()
+        cv2.destroyAllWindows()
+        self.detector_mao.close()
+        self.detector_rosto.close()
+        print("\n[INFO]: Sistema encerrado com sucesso.")
+
 if __name__ == "__main__":
     app = ControladorNovaAPI()
     app.iniciar()

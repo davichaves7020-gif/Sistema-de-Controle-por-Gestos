@@ -36,7 +36,8 @@ python main.py
 
 ## 🎮 Comandos do Sistema
 * **Mover o mouse:** Apontar o dedo indicador esticado.
-* **Clique Esquerdo:** Dobrar rapidamente a ponta do indicador (gesto de gatilho).
+* **Clique direito:** Dobrar rapidamente a ponta do dedo indicador (gesto de gatilho).
+* **Clique Esquerdo:** Dobrar rapidamente a ponta do dedo do meio (gesto de gatilho).
 * **Barra de Espaço:** Piscar o olho direito.
 * **Tecla P:** Pausa/Retoma o rastreamento do sistema.
 * **Tecla Q:** Encerra a execução do software.
